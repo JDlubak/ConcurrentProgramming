@@ -10,6 +10,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Xml;
 
 namespace TP.ConcurrentProgramming.Data
 {
@@ -19,7 +20,7 @@ namespace TP.ConcurrentProgramming.Data
 
     public DataImplementation()
     {
-      MoveTimer = new Timer(Move, null, TimeSpan.Zero, TimeSpan.FromMilliseconds(100));
+      MoveTimer = new Timer(Move, null, TimeSpan.Zero, TimeSpan.FromMilliseconds(16));      // wieksza plynnosc - ok. 60 fps
     }
 
     #endregion ctor
@@ -35,10 +36,16 @@ namespace TP.ConcurrentProgramming.Data
       Random random = new Random();
       for (int i = 0; i < numberOfBalls; i++)
       {
-        Vector startingPosition = new(random.Next(100, 400 - 100), random.Next(100, 400 - 100));
-        Ball newBall = new(startingPosition, startingPosition);
-        upperLayerHandler(startingPosition, newBall);
-        BallsList.Add(newBall);
+                Vector startingPosition = new(random.Next(0, 773), random.Next(0, 573));        // 2 * 4 od ramki, 20 od średnicy
+                Vector ballVelocity;
+                do
+                {
+                    ballVelocity = new((RandomGenerator.NextDouble() - 0.5) * 4, 
+                                       (RandomGenerator.NextDouble() - 0.5) * 3);
+                } while (ballVelocity.x == 0 || ballVelocity.y == 0);
+                Ball newBall = new(startingPosition, ballVelocity);
+                upperLayerHandler(startingPosition, newBall);
+                BallsList.Add(newBall);
       }
     }
 
@@ -81,9 +88,23 @@ namespace TP.ConcurrentProgramming.Data
 
     private void Move(object? x)
     {
-      foreach (Ball item in BallsList)
-        item.Move(new Vector((RandomGenerator.NextDouble() - 0.5) * 10, (RandomGenerator.NextDouble() - 0.5) * 10));
-    }
+            foreach (Ball item in BallsList) {
+                IVector velocity = item.Velocity;
+                Vector position = item.GetPosition();
+                double xResult = position.x + velocity.x;
+                double yResult = position.y + velocity.y;
+                if (xResult < 0 || xResult > 772)       // 2 * 4 od ramki, 20 od średnicy
+                {
+                    velocity = new Vector(-velocity.x, velocity.y);
+                } 
+                if (yResult < 0 || yResult > 572)       // 2 * 4 od ramki, 20 od średnicy
+                {
+                    velocity = new Vector(velocity.x, -velocity.y);
+                }
+                item.Velocity = new Vector(velocity.x, velocity.y);
+                item.Move(new Vector(item.Velocity.x, item.Velocity.y));
+            }
+        }
 
     #endregion private
 

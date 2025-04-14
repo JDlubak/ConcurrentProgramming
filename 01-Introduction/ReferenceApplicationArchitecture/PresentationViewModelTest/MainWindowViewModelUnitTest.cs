@@ -56,9 +56,73 @@ namespace TP.ConcurrentProgramming.Presentation.ViewModel.Test
       Assert.AreEqual<int>(0, viewModel.Balls.Count);
     }
 
-    #region testing infrastructure
+        [TestMethod]
+        // testowanie prawid³owej reakcji odnoœnie mo¿liwoœci startu w zale¿noœci od danych wejœciowych
+        public void BallCountTextValidationTestMethod()
+        {
+            ModelNullFixture model = new();
+            MainWindowViewModel viewModel = new(model);
+            bool propertyChangedRaised = false;
+            viewModel.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(viewModel.BallCountText))
+                    propertyChangedRaised = true;
+            };
 
-    private class ModelNullFixture : ModelAbstractApi
+            viewModel.BallCountText = "abc";
+            bool cannotExecuteWithText = viewModel.StartCommand.CanExecute(null);
+
+            viewModel.BallCountText = "5"; 
+            bool canExecute = viewModel.StartCommand.CanExecute(null);
+
+            viewModel.BallCountText = "0";
+            bool cannotExecuteWithZero = viewModel.StartCommand.CanExecute(null);
+
+            viewModel.BallCountText = "";
+            bool cannotExecuteAfterRemovingInput = viewModel.StartCommand.CanExecute(null);
+
+            viewModel.BallCountText = "-1";
+            bool cannotExecuteWithNegativeNumber = viewModel.StartCommand.CanExecute(null);
+
+            viewModel.BallCountText = "1.0";
+            bool cannotExecuteWithDouble = viewModel.StartCommand.CanExecute(null);
+
+            Assert.IsTrue(propertyChangedRaised, "PropertyChanged nie zosta³o wywo³ane");
+            Assert.IsFalse(cannotExecuteWithText, "Wpisano tekst - nie mo¿na wystartowaæ");
+            Assert.IsTrue(canExecute, "Wpisano poprawne dane - mo¿na wystartowaæ");
+            Assert.IsFalse(cannotExecuteWithZero, "Wpisano zero - nie mo¿na wystartowaæ");
+            Assert.IsFalse(cannotExecuteAfterRemovingInput, "Usuniêto dane - nie mo¿na wystartowaæ");
+            Assert.IsFalse(cannotExecuteWithNegativeNumber, "Wpisano ujemn¹ liczbê - nie mo¿na wystartowaæ");
+            Assert.IsFalse(cannotExecuteWithDouble, "Wpisano liczbê zmiennoprzecinkow¹ - nie mo¿na wystartowaæ");
+
+        }
+
+        [TestMethod]
+        // testowanie prawid³owoœci zmiany tekstu w polu tekstowym
+        public void BallCountTextChangeTestMethod()
+        {
+            ModelNullFixture model = new();
+            MainWindowViewModel viewModel = new(model);
+            Assert.IsTrue(viewModel.BallCountText.Equals(""), "Pocz¹tkowy tekst jest pusty");
+            viewModel.BallCountText = "tekst";
+            Assert.IsTrue(viewModel.BallCountText.Equals("tekst"), "Zmieniliœmy tekst wiêc mia³ siê zmieniæ");
+
+        }
+
+        [TestMethod]
+        // testowanie prawid³owej reakcji odnoœnie mo¿liwoœci startu w zale¿noœci od danych wejœciowych
+        public void VisibilityTestMethod()
+        {
+            ModelNullFixture model = new();
+            MainWindowViewModel viewModel = new(model);
+            Assert.AreEqual(System.Windows.Visibility.Visible, viewModel.InputVisibility, "Pocz¹tkowa widocznoœæ - Visible.");
+            viewModel.Start(5);
+            Assert.AreEqual(System.Windows.Visibility.Collapsed, viewModel.InputVisibility, "Koñcowa widocznoœæ - Collapsed.");
+        }
+
+        #region testing infrastructure
+
+        private class ModelNullFixture : ModelAbstractApi
     {
       #region Test
 

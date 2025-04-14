@@ -32,5 +32,13 @@ namespace TP.ConcurrentProgramming.Data.Test
       Assert.AreEqual<int>(1, numberOfCallBackCalled);
       Assert.AreEqual<IVector>(initialPosition, curentPosition);
     }
+
+        [TestMethod]
+        public void GetPositionTestMethod()
+        {
+            Vector initialPosition = new(20.0, 20.0);
+            Ball newBall = new(initialPosition, initialPosition);
+            Assert.AreEqual(initialPosition, newBall.GetPosition());
+        }
   }
 }
