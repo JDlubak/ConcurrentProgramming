@@ -1,16 +1,6 @@
-﻿//____________________________________________________________________________________________________________________________________
-//
-//  Copyright (C) 2024, Mariusz Postol LODZ POLAND.
-//
-//  To be in touch join the community by pressing the `Watch` button and get started commenting using the discussion panel at
-//
-//  https://github.com/mpostol/TP/discussions/182
-//
-//_____________________________________________________________________________________________________________________________________
+﻿using System.Diagnostics;
+using System.Runtime.Intrinsics.X86;
 
-using System;
-using System.Diagnostics;
-using System.Xml;
 
 namespace TP.ConcurrentProgramming.Data
 {
@@ -18,10 +8,7 @@ namespace TP.ConcurrentProgramming.Data
   {
     #region ctor
 
-    public DataImplementation()
-    {
-      MoveTimer = new Timer(Move, null, TimeSpan.Zero, TimeSpan.FromMilliseconds(16));      // wieksza plynnosc - ok. 60 fps
-    }
+    public DataImplementation() {}
 
     #endregion ctor
 
@@ -33,19 +20,55 @@ namespace TP.ConcurrentProgramming.Data
         throw new ObjectDisposedException(nameof(DataImplementation));
       if (upperLayerHandler == null)
         throw new ArgumentNullException(nameof(upperLayerHandler));
-      Random random = new Random();
       for (int i = 0; i < numberOfBalls; i++)
       {
-                Vector startingPosition = new(random.Next(0, 773), random.Next(0, 573));        // 2 * 4 od ramki, 20 od średnicy
+                Vector startingPosition;
+                bool isGoodPosition = false;
+                do
+                {
+                    startingPosition = new(RandomGenerator.Next(0, 773), RandomGenerator.Next(0, 573));        // 2 * 4 od ramki, 20 od średnicy
+                    isGoodPosition = true;
+                    foreach (var ball in BallsList)
+                    {
+                        Vector ballPosition = ball.GetPosition();
+                        double distance = Math.Sqrt(Math.Pow(startingPosition.x - ballPosition.x, 2) + Math.Pow(startingPosition.y - ballPosition.y, 2));
+                        if (distance <= 25)
+                        {
+                            isGoodPosition = false;
+                            break;
+                        }
+                    }
+                } while (!isGoodPosition);
                 Vector ballVelocity;
                 do
                 {
                     ballVelocity = new((RandomGenerator.NextDouble() - 0.5) * 4, 
                                        (RandomGenerator.NextDouble() - 0.5) * 3);
                 } while (ballVelocity.x == 0 || ballVelocity.y == 0);
-                Ball newBall = new(startingPosition, ballVelocity);
+                int randomMassValue = RandomGenerator.Next(1, 5);
+                Mass randomMass = 0;
+                switch (randomMassValue)
+                {
+                    case 1:
+                        randomMass = Mass.Light;
+                        break;
+                    case 2:
+                        randomMass = Mass.Medium;
+                        break;
+                    case 3:
+                        randomMass = Mass.Heavy;
+                        break;
+                    case 4:
+                        randomMass = Mass.VeryHeavy;
+                        break;
+                }
+                Ball newBall = new(startingPosition, ballVelocity, randomMass);
                 upperLayerHandler(startingPosition, newBall);
-                BallsList.Add(newBall);
+                lock (_lock)
+                {
+                    BallsList.Add(newBall);
+                }
+                Task.Run(() => Move(newBall));
       }
     }
 
@@ -59,8 +82,18 @@ namespace TP.ConcurrentProgramming.Data
       {
         if (disposing)
         {
-          MoveTimer.Dispose();
-          BallsList.Clear();
+                    lock (_lock)
+                    {
+                        foreach (var thread in ThreadsList)
+                        {
+                            if (thread.IsAlive)
+                            {
+                                thread.Join();
+                            }
+                        }
+                        ThreadsList.Clear();
+                        BallsList.Clear();
+                    }
         }
         Disposed = true;
       }
@@ -81,36 +114,148 @@ namespace TP.ConcurrentProgramming.Data
 
     //private bool disposedValue;
     private bool Disposed = false;
-
-    private readonly Timer MoveTimer;
     private Random RandomGenerator = new();
     private List<Ball> BallsList = [];
+    private List<Thread> ThreadsList = new();
+    private readonly object _lock = new();
+    private readonly Dictionary<(Ball, Ball), DateTime> _collisionCooldowns = new Dictionary<(Ball, Ball), DateTime>();
+    private readonly TimeSpan _collisionCooldown = TimeSpan.FromMilliseconds(100);
 
-    private void Move(object? x)
-    {
-            foreach (Ball item in BallsList) {
-                IVector velocity = item.Velocity;
-                Vector position = item.GetPosition();
-                double xResult = position.x + velocity.x;
-                double yResult = position.y + velocity.y;
-                if (xResult < 0 || xResult > 772)       // 2 * 4 od ramki, 20 od średnicy
+
+    private (Ball, Ball) GetCollisionKey(Ball a, Ball b)
+        {
+            return System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(a) <= System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(b)
+                ? (a, b)
+                : (b, a);
+        }
+        private async Task Move(Ball ball)
+        {
+            while (!Disposed)
+            {
+                lock (_lock)
                 {
-                    velocity = new Vector(-velocity.x, velocity.y);
-                } 
-                if (yResult < 0 || yResult > 572)       // 2 * 4 od ramki, 20 od średnicy
-                {
-                    velocity = new Vector(velocity.x, -velocity.y);
+                    foreach (var anotherBall in BallsList)
+                    {
+                        if (ball == anotherBall) continue;
+                        if (CollisionDetector(ball, anotherBall))
+                        {
+                            var key = GetCollisionKey(ball, anotherBall);
+                            if (_collisionCooldowns.TryGetValue(key, out DateTime lastCollisionTime))
+                            {
+                                if (DateTime.Now - lastCollisionTime < _collisionCooldown)
+                                {
+                                    continue;
+                                }
+                            }
+                            CollisionMovement(ball, anotherBall);
+                            _collisionCooldowns[key] = DateTime.Now;
+                        }
+
+                    }
+                        IVector velocity = ball.Velocity;
+                        Vector position = ball.GetPosition();
+                        double xResult = position.x + velocity.x;
+                        double yResult = position.y + velocity.y;
+                        if (xResult < 0 || xResult > 772)       // 2 * 4 od ramki, 20 od średnicy
+                        {
+                            velocity = new Vector(-velocity.x, velocity.y);
+                        }
+                        if (yResult < 0 || yResult > 572)       // 2 * 4 od ramki, 20 od średnicy
+                        {
+                            velocity = new Vector(velocity.x, -velocity.y);
+                        }
+                        ball.Move(new Vector(velocity.x, velocity.y));
+                        ball.Velocity = velocity;
+
+                    
+
                 }
-                item.Velocity = new Vector(velocity.x, velocity.y);
-                item.Move(new Vector(item.Velocity.x, item.Velocity.y));
+                await Task.Delay(16);
+            }
+        }
+    private bool CollisionDetector(Ball b1, Ball b2)
+        {
+            Vector b1pos = b1.GetPosition();
+            Vector b2pos = b2.GetPosition();
+            double distance = Math.Sqrt(Math.Pow(b1pos.x - b2pos.x, 2) + Math.Pow(b1pos.y - b2pos.y, 2));
+            return distance <= 20;
+        }
+
+        private void CollisionMovement(Ball a, Ball b)
+        {
+                {   
+                    // Pobranie mas
+                    int ma = (int)a.Mass;
+                    int mb = (int)b.Mass;
+
+                    // Pobranie pozycji
+                    Vector aPos = a.GetPosition();
+                    Vector bPos = b.GetPosition();
+                    
+                    // obliczenie różnicy w pozycji i dystansu między kulkami
+                    Vector difference = new Vector(bPos.x - aPos.x, bPos.y - aPos.y);
+                    double distance = Math.Sqrt(difference.x * difference.x + difference.y * difference.y);
+                    
+                    // Normalizacja wektora i utworzenie wektora stycznego do niego
+                    Vector normalVector = new Vector(difference.x / distance, difference.y / distance);
+                    Vector tangentVector = new Vector(-normalVector.y, normalVector.x);
+                    
+                    // Pobranie prędkości kulek
+                    IVector vA = a.Velocity;
+                    IVector vB = b.Velocity;
+
+                    // Przeskalowanie do znormalizowanych i stycznych prędkości
+                    double vA_normalized = vA.x * normalVector.x + vA.y * normalVector.y;
+                    double vB_normalized = vB.x * normalVector.x + vB.y * normalVector.y;
+                    double vA_tangent = vA.x * tangentVector.x + vA.y * tangentVector.y;
+                    double vB_tangent = vB.x * tangentVector.x + vB.y * tangentVector.y;
+
+                    // Dodatkowe informacje do debugowania kolizji
+                    Debug.WriteLine($"Before collision: ma = {ma}, mb = {mb}");
+                    Debug.WriteLine($"a.position = ({Math.Round(aPos.x, 2)}, {Math.Round(aPos.y, 2)}), a.velocity = ({Math.Round(vA.x, 2)}, {Math.Round(vA.y, 2)})");
+                    Debug.WriteLine($"b.position = ({Math.Round(bPos.x, 2)}, {Math.Round(bPos.y, 2)}), b.velocity = ({Math.Round(vB.x, 2)}, {Math.Round(vB.y, 2)})");
+                    
+                    // przeliczenie prędkości nowych
+                    double newV_A_normal = (vA_normalized * (ma - mb) + 2 * mb * vB_normalized) / (ma + mb);
+                    double newV_B_normal = (vB_normalized * (mb - ma) + 2 * ma * vA_normalized) / (ma + mb);
+
+                    // rozłożenie prędkości na składowe
+                    double newVax = newV_A_normal * normalVector.x + vA_tangent * tangentVector.x;
+                    double newVay = newV_A_normal * normalVector.y + vA_tangent * tangentVector.y;
+                    double newVbx = newV_B_normal * normalVector.x + vB_tangent * tangentVector.x;
+                    double newVby = newV_B_normal * normalVector.y + vB_tangent * tangentVector.y;
+                    
+                    // aktualizacja prędkości
+                    a.Velocity = new Vector(newVax, newVay);
+                    b.Velocity = new Vector(newVbx, newVby);
+
+                    // Dodatkowe informacje do debugowania kolizji
+                    Debug.WriteLine($"After collision: ");
+                    Debug.WriteLine($"a.position = ({Math.Round(aPos.x, 2)}, {Math.Round(aPos.y, 2)}), a.velocity = ({Math.Round(a.Velocity.x, 2)}, {Math.Round(a.Velocity.y, 2)})");
+                    Debug.WriteLine($"b.position = ({Math.Round(bPos.x, 2)}, {Math.Round(bPos.y, 2)}), b.velocity = ({Math.Round(b.Velocity.x, 2)}, {Math.Round(b.Velocity.y, 2)})");
+                    Debug.WriteLine("");
+
             }
         }
 
-    #endregion private
+        internal bool callCollisionCheckerForTesting(Ball b1, Ball b2)
+        {
+            return CollisionDetector(b1, b2);
+        }
 
-    #region TestingInfrastructure
+        internal void simulateCollisionToTest(Ball b1, Ball b2)
+        {
+            CollisionMovement(b1, b2);
+        }
 
-    [Conditional("DEBUG")]
+
+
+
+        #endregion private
+
+        #region TestingInfrastructure
+
+        [Conditional("DEBUG")]
     internal void CheckBallsList(Action<IEnumerable<IBall>> returnBallsList)
     {
       returnBallsList(BallsList);
